@@ -27,6 +27,7 @@ class MainWindow(QMainWindow):
         self.menu_bar = QMenuBar()
 
         self.documents = QStandardItemModel()
+
         self.documents.setHorizontalHeaderLabels(["File Name", "Folder", "Pages"])
         self.menus = OrderedDict()
 
@@ -127,9 +128,13 @@ class DocumentList(QTableView):
         self.setDisabled(True)
 
         self.header = self.horizontalHeader()
+        self.clicked.connect(self.doc_changed)
 
         self.setModel(self.parent.documents)
-        self.selectionChanged()
+
+    def doc_changed(self, index):
+        row = self.parent.documents.itemFromIndex(index).row()
+        print(row)
 
     def add_document(self, path):
         """Add a document to the list."""
