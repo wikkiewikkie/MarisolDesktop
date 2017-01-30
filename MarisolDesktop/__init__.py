@@ -23,6 +23,12 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("MarisolDesktop")
+        self.setContentsMargins(0, 0, 0, 0)
+
+        self.numbering_config = {"prefix": "ABC",
+                                 "start": 1,
+                                 "fill": 6,
+                                 "position": "Bottom Left"}
 
         self.menu_bar = QMenuBar()
 
@@ -46,16 +52,8 @@ class MainWindow(QMainWindow):
 
         self.list = DocumentList(self)
 
-        self.view = QWebEngineView()
-        self.view.setUrl(QUrl("file:///view.html"))
-        QWebEngineSettings.globalSettings().setAttribute(QWebEngineSettings.PluginsEnabled, True)
-
-        #self.view.page().settings().setAttribute()
-        #self.view.
-        #self.view.settingsQWebEngineSettings.setAttribute(, True)
-
-        #self.view.setDisabled(True)
-        self.setCentralWidget(self.view)
+        self.viewer = Viewer()
+        self.setCentralWidget(self.viewer)
 
         self.documents_dock = QDockWidget("Documents", self)
         self.documents_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
@@ -66,38 +64,133 @@ class MainWindow(QMainWindow):
         self.numbering_dock = QDockWidget("Numbering", self)
         self.numbering_dock.setAllowedAreas(Qt.TopDockWidgetArea | Qt.BottomDockWidgetArea)
         self.numbering_dock.setFeatures(QDockWidget.DockWidgetMovable)
+        self.numbering_form = NumberingForm(self.numbering_dock)
+        self.numbering_dock.setWidget(self.numbering_form)
         self.addDockWidget(Qt.TopDockWidgetArea, self.numbering_dock)
 
         self.add_documents_dialog = FileSelector(self, "Add Documents")
-
-
 
     def add_documents(self):
         """Opens the add file dialog."""
         self.add_documents_dialog.show()
 
-    def load_file(self, path):
-        with open(path, "rb") as pdf_file:
-            self.pdf_data = pdf_file.read()
-        return self.render_pdf()
 
-    def render_pdf(self):
+class Viewer(QWebEngineView):
+
+    def __init__(self):
+        """Viewer capable of displaying a PDF file."""
+        super().__init__()
+        self.data = None
+
+        self.setContentsMargins(0, 0, 0, 0)
+        self.setDisabled(True)
+
+    def handle_load_finished(self, status):
         """
-        Draw the PDF using data cached in pdf_data.
+        Handler for loadFinished signal. Calls render_file is page loaded ok.
+
+        Args:
+            status (bool):
 
         Returns:
             bool
         """
-        # encode as base 64 and then convert to UTF-8
-        self.pdf_data = base64.b64encode(self.pdf_data)
-        self.pdf_data = self.pdf_data.decode('utf-8')
-        script = "qpdf_ShowPdfFile('{}')".format(self.pdf_data)
-        print(script)
-        self.view.page().runJavaScript(script)
-        # clear out variable once it is used
-        self.pdf_data = None
+        if status:
+            self.render_file()
+        return status
 
-        return True
+    def load_file(self, path):
+        """
+        Loads data from a PDF file into variable and then renders.
+
+        Args:
+            path (Str):  Full path to the PDF file.
+
+        Returns:
+            bool: True on success, false on failure.
+
+        """
+        with open(path, "rb") as pdf_file:
+            self.data = pdf_file.read()
+        return self.render_file()
+
+    def render_file(self):
+        """
+        Draw the PDF from cached data.
+
+        Returns:
+            bool
+        """
+        if self.data is not None:
+
+            if not self.isEnabled():  # initialize if not initialized
+                self.setDisabled(False)
+                self.setUrl(QUrl("file:///view.html"))
+                self.loadFinished.connect(self.render_file) # wait for page to load, and then call again
+
+            else:
+                # encode as base 64 and then convert to UTF-8
+                self.data = base64.b64encode(self.data)
+                self.data = self.data.decode('utf-8')
+                script = "qpdf_ShowPdfFile('{}')".format(self.data)
+                self.page().runJavaScript(script)
+
+                self.data = None  # get rid of cached data
+
+            return True
+
+        return False
+
+
+class NumberingForm(QWidget):
+
+    def __init__(self, parent):
+        """
+        The numbering form.
+
+        Args:
+            parent (QDockWidget): parent widget
+        """
+        super().__init__(parent)
+
+        self.parent = parent
+        self.config = parent.parentWidget().numbering_config
+
+        self.layout = QFormLayout(self)
+        self.setLayout(self.layout)
+
+        # set up inputs
+        self.fill_edit = QSpinBox(self)
+        self.fill_edit.setValue(self.config['fill'])
+        self.prefix_edit = QLineEdit(self.config['prefix'], self)
+        self.position_edit = QComboBox(self)
+        self.position_edit.addItems(["Bottom Left", "Bottom Right", "Top Left", "Top Right"])
+        self.start_edit = QSpinBox(self)
+        self.start_edit.setValue(self.config['start'])
+
+        # add inputs to layout
+        self.layout.addRow("&Prefix:", self.prefix_edit)
+        self.layout.addRow("&Start:", self.start_edit)
+        self.layout.addRow("&Fill:", self.fill_edit)
+        self.layout.addRow("&Position:", self.position_edit)
+
+        # connect handlers for changes to config
+        self.fill_edit.valueChanged.connect(self.handle_fill_change)
+        self.prefix_edit.textChanged.connect(self.handle_prefix_change)
+        self.position_edit.currentTextChanged.connect(self.handle_position_change)
+        self.start_edit.valueChanged.connect(self.handle_start_change)
+
+    def handle_fill_change(self, value):
+        self.config["fill"] = value
+
+    def handle_position_change(self, text):
+        self.config["position"] = text
+
+    def handle_prefix_change(self, text):
+        self.config["prefix"] = text
+
+    def handle_start_change(self, value):
+        self.config["start"] = value
 
 
 class FileSelector(QFileDialog):
@@ -121,6 +214,11 @@ class FileSelector(QFileDialog):
 class DocumentList(QTableView):
 
     def __init__(self, parent):
+        """
+
+        Args:
+            parent (MainWindow) : parent window
+        """
         super().__init__(parent)
 
         self.parent = parent
@@ -128,13 +226,17 @@ class DocumentList(QTableView):
         self.setDisabled(True)
 
         self.header = self.horizontalHeader()
-        self.clicked.connect(self.doc_changed)
+        self.clicked.connect(self.handle_document_change)
 
         self.setModel(self.parent.documents)
 
-    def doc_changed(self, index):
+    def handle_document_change(self, index):
         row = self.parent.documents.itemFromIndex(index).row()
-        print(row)
+        file_name = self.parent.documents.item(row, 0).text()
+        path = self.parent.documents.item(row, 1).text()
+        path = os.path.join(path, file_name)
+        self.parent.viewer.load_file(path)
+        print(row, path)
 
     def add_document(self, path):
         """Add a document to the list."""
